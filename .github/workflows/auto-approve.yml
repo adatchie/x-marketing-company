@@ -1,5 +1,8 @@
 name: Auto Approve
 
+permissions:
+  contents: write
+
 on:
   schedule:
     # 30分ごとにチェック
