@@ -42,53 +42,21 @@ llm_generate() {
         return 1
     fi
 
-    # URLからAPI種別を判定
-    if echo "$LLM_API_URL" | grep -q "anthropic"; then
-        # Claude API
-        curl -s "$LLM_API_URL" \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $LLM_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -d "$(cat <<JSON
-{
-    "model": "$LLM_MODEL",
-    "max_tokens": 1024,
-    "system": "$system_prompt",
-    "messages": [{"role": "user", "content": $(echo "$prompt" | jq -Rs .)}]
-}
-JSON
-)" | jq -r '.content[0].text // empty' 2>/dev/null
-    elif echo "$LLM_API_URL" | grep -q "openai"; then
-        # OpenAI API
-        curl -s "$LLM_API_URL" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $LLM_API_KEY" \
-            -d "$(cat <<JSON
-{
-    "model": "$LLM_MODEL",
-    "max_tokens": 1024,
-    "messages": [
-        {"role": "system", "content": "$system_prompt"},
-        {"role": "user", "content": $(echo "$prompt" | jq -Rs .)}
+    # OpenAI互換API（Z.AI GLM-5.1 / OpenAI / その他）
+    local escaped_prompt
+    escaped_prompt=$(echo "$prompt" | jq -Rs .)
+    local escaped_system
+    escaped_system=$(echo "$system_prompt" | jq -Rs .)
+
+    curl -s "$LLM_API_URL" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $LLM_API_KEY" \
+        -d "{
+    \"model\": \"$LLM_MODEL\",
+    \"max_tokens\": 1024,
+    \"messages\": [
+        {\"role\": \"system\", \"content\": $escaped_system},
+        {\"role\": \"user\", \"content\": $escaped_prompt}
     ]
-}
-JSON
-)" | jq -r '.choices[0].message.content // empty' 2>/dev/null
-    else
-        # 汎用（OpenAI互換）
-        curl -s "$LLM_API_URL" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $LLM_API_KEY" \
-            -d "$(cat <<JSON
-{
-    "model": "$LLM_MODEL",
-    "max_tokens": 1024,
-    "messages": [
-        {"role": "system", "content": "$system_prompt"},
-        {"role": "user", "content": $(echo "$prompt" | jq -Rs .)}
-    ]
-}
-JSON
-)" | jq -r '.choices[0].message.content // .content[0].text // empty' 2>/dev/null
-    fi
+}" | jq -r '.choices[0].message.content // .content[0].text // empty' 2>/dev/null
 }
