@@ -54,7 +54,7 @@ notify_draft_item() {
         truncated_content="${truncated_content:0:600}..."
     fi
 
-    local instructions="Draft ID: \`\`\`\n${draft_id}\n\`\`\`\n[Run workflow](${approve_url})\n**Approve**: action=\`approve\`, draft_id=上記\n**Revise**: action=\`revise\`, draft_id=上記, feedback=修正指示\n**Regenerate**: action=\`regenerate\`, draft_id=上記, feedback=追加指示(空OK)"
+    local instructions="[Approve/Revise/Regenerate](${approve_url})\nページ右側の「Run workflow ▼」を押して:\ndraft_idに下記をコピペ:\n\`\`\`\n${draft_id}\n\`\`\`\napprove→そのままRun\nrevise→actionをreviseに + feedbackに修正指示\nregenerate→actionをregenerateに + feedback空OK"
 
     jq -n \
         --arg title "[${employee}] $(date +%Y-%m-%d)" \
