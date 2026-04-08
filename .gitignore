@@ -1,0 +1,6 @@
+node_modules/
+employees/logs/*.log
+employees/logs/*.md
+input/
+*.tmp
+.env
