@@ -7,14 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'アクション (approve/revise)'
+        description: 'アクション (approve/revise/regenerate)'
         required: true
         default: 'approve'
       draft_id:
         description: '下書きID'
         required: true
       feedback:
-        description: '修正フィードバック（reviseの場合のみ。修正指示を書く）'
+        description: '修正指示（revise）または再生成の追加指示（regenerate、空でもOK）'
         required: false
         default: ''
 
@@ -146,6 +146,81 @@ ${FEEDBACK}
             git push
 
             echo "Revised draft sent for review: ${V2_DRAFT_ID}"
+
+          elif [ "$ACTION" = "regenerate" ]; then
+            echo "=== REGENERATE MODE ==="
+
+            # リサーチデータがあれば取得
+            RESEARCH_DATA=""
+            RESEARCH_FILE="employees/logs/research-brief-$(date +%Y-%m-%d).md"
+            if [ -f "$RESEARCH_FILE" ]; then
+              RESEARCH_DATA=$(cat "$RESEARCH_FILE" | head -100)
+            fi
+
+            EXTRA_CTX=""
+            if [ -n "$FEEDBACK" ]; then
+              EXTRA_CTX="【追加指示】${FEEDBACK}"
+            fi
+
+            REGEN_PROMPT="X（Twitter）の投稿文を1つ作成する。前の案をボツにして、全く新しい切り口で書き直す。
+
+【絶対ルール】
+1. 提供されたリサーチデータのみを使う。データにない情報は絶対に書かない。
+2. 人間が書いたような自然な日本語。AIっぽい表現禁止。
+3. 禁止：「〜の時代になりました」「〜ではないでしょうか」「皆さん」「ぜひ」「革新的な」
+4. 「だ・である」混じりのラフな口調。一人称は「ぼく」または省略。
+5. 具体的なツール名・数字を入れる。
+6. 140字超えならスレッド形式。
+7. ハッシュタグ2〜3個。出力は投稿文のみ。
+
+【ペルソナ】
+「AI×副業 60日で0→1チャレンジ」実践中の30代。
+note販売、X、Threads、YouTube、アフィリエイト等を手広く試している。実績なし。
+常にチャレンジの文脈で書く。成功者を装わない。
+禁止：Polymarket、予測市場、BOT、仮想通貨ギャンブル、収益額の誇示
+
+【リサーチデータ（これだけを使う）】
+${RESEARCH_DATA}
+
+${EXTRA_CTX}
+
+出力は投稿文のみ。"
+
+            REGENERATED=$(llm_generate "$REGEN_PROMPT" "あなたはSNSマーケティングのプロです。")
+
+            if [ -z "$REGENERATED" ]; then
+              notify_discord "Regenerate Failed" "LLM regenerate failed for: ${DRAFT_ID}" 15158332
+              exit 1
+            fi
+
+            # 新しいpendingファイルを作成
+            REGEN_DRAFT_ID="${TYPE}-$(date +%Y%m%d%H%M%S)-regen"
+            REGEN_FILE="employees/logs/pending/${REGEN_DRAFT_ID}.json"
+
+            jq -n \
+              --arg id "$REGEN_DRAFT_ID" \
+              --arg type "$TYPE" \
+              --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg status "pending" \
+              --arg pt "$REGENERATED" \
+              --arg regen_from "$DRAFT_ID" \
+              '{id: $id, type: $type, status: $status, created_at: $ts, regenerated_from: $regen_from, data: {post_text: $pt, reply_text: $pt, quote_text: $pt}}' > "$REGEN_FILE"
+
+            # 元の下書きをrejectedに
+            jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {status: "rejected", rejected_at: $ts}' "$PENDING_FILE" > "${PENDING_FILE}.tmp"
+            mv "${PENDING_FILE}.tmp" "$PENDING_FILE"
+
+            # 再生成稿をDiscordに通知
+            notify_draft_item "${TYPE} (regenerated)" "$REGEN_DRAFT_ID" "【再生成稿】\n${REGENERATED}"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git pull --rebase origin main || true
+            git add employees/logs/pending/
+            git commit -m "Regenerate: ${REGEN_DRAFT_ID} (from ${DRAFT_ID})" || true
+            git push
+
+            echo "Regenerated draft: ${REGEN_DRAFT_ID}"
 
           elif [ "$ACTION" = "approve" ]; then
             echo "=== APPROVE MODE ==="

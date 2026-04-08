@@ -54,7 +54,7 @@ notify_draft_item() {
         truncated_content="${truncated_content:0:600}..."
     fi
 
-    local instructions="Draft ID: \`\`\`\n${draft_id}\n\`\`\`\n[Run workflow](${approve_url})\n**Approve**: action=approve, draft_id=上記\n**Revise**: action=revise, draft_id=上記, feedback=修正指示"
+    local instructions="Draft ID: \`\`\`\n${draft_id}\n\`\`\`\n[Run workflow](${approve_url})\n**Approve**: action=\`approve\`, draft_id=上記\n**Revise**: action=\`revise\`, draft_id=上記, feedback=修正指示\n**Regenerate**: action=\`regenerate\`, draft_id=上記, feedback=追加指示(空OK)"
 
     jq -n \
         --arg title "[${employee}] $(date +%Y-%m-%d)" \
