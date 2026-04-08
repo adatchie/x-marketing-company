@@ -42,21 +42,28 @@ llm_generate() {
         return 1
     fi
 
-    # OpenAI互換API（Z.AI GLM-5.1 / OpenAI / その他）
-    local escaped_prompt
-    escaped_prompt=$(echo "$prompt" | jq -Rs .)
-    local escaped_system
-    escaped_system=$(echo "$system_prompt" | jq -Rs .)
+    # JSONを一時ファイルに書き出して送信（Windowsのエンコーディング問題回避）
+    local tmp_json
+    tmp_json=$(mktemp)
+    jq -n \
+        --arg model "$LLM_MODEL" \
+        --arg system "$system_prompt" \
+        --arg user "$prompt" \
+        '{
+            model: $model,
+            max_tokens: 4096,
+            messages: [
+                {role: "system", content: $system},
+                {role: "user", content: $user}
+            ]
+        }' > "$tmp_json"
 
-    curl -s "$LLM_API_URL" \
-        -H "Content-Type: application/json" \
+    local response
+    response=$(curl -s "$LLM_API_URL" \
+        -H "Content-Type: application/json; charset=utf-8" \
         -H "Authorization: Bearer $LLM_API_KEY" \
-        -d "{
-    \"model\": \"$LLM_MODEL\",
-    \"max_tokens\": 1024,
-    \"messages\": [
-        {\"role\": \"system\", \"content\": $escaped_system},
-        {\"role\": \"user\", \"content\": $escaped_prompt}
-    ]
-}" | jq -r '.choices[0].message.content // .content[0].text // empty' 2>/dev/null
+        -d @"$tmp_json")
+    rm -f "$tmp_json"
+
+    echo "$response" | jq -r '.choices[0].message.content // empty' 2>/dev/null
 }
