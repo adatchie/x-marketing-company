@@ -1,17 +1,20 @@
 name: Approve Draft
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'アクション (approve/edit)'
+        description: 'アクション (approve/revise)'
         required: true
         default: 'approve'
       draft_id:
-        description: '下書きID (pending/内のファイル名)'
+        description: '下書きID'
         required: true
-      new_content:
-        description: '修正内容（editの場合のみ）'
+      feedback:
+        description: '修正フィードバック（reviseの場合のみ。修正指示を書く）'
         required: false
         default: ''
 
@@ -58,23 +61,11 @@ jobs:
       - name: Create directories
         run: mkdir -p employees/logs/pending
 
-      - name: Restore pending file
-        env:
-          DRAFT_ID: ${{ github.event.inputs.draft_id }}
-        run: |
-          # pendingファイルをgitから復元（あれば）
-          if [ -f "employees/logs/pending/${DRAFT_ID}.json" ]; then
-            echo "Found pending file: ${DRAFT_ID}"
-            cat "employees/logs/pending/${DRAFT_ID}.json"
-          else
-            echo "Warning: pending file not found locally"
-          fi
-
-      - name: Execute approval
+      - name: Process action
         env:
           DRAFT_ID: ${{ github.event.inputs.draft_id }}
           ACTION: ${{ github.event.inputs.action }}
-          NEW_CONTENT: ${{ github.event.inputs.new_content }}
+          FEEDBACK: ${{ github.event.inputs.feedback }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: glm-5.1
@@ -86,19 +77,93 @@ jobs:
           PENDING_FILE="employees/logs/pending/${DRAFT_ID}.json"
           if [ ! -f "$PENDING_FILE" ]; then
             echo "Error: Draft not found: $DRAFT_ID"
-            notify_result "system" "承認エラー" "下書きが見つかりません: ${DRAFT_ID}" "false"
+            notify_discord "Error" "Draft not found: ${DRAFT_ID}" 15158332
             exit 1
           fi
 
           TYPE=$(jq -r '.type' "$PENDING_FILE")
+          ORIGINAL=$(jq -r '.data | (.post_text // .reply_text // .quote_text // "N/A")' "$PENDING_FILE")
 
-          if [ "$ACTION" = "edit" ] && [ -n "$NEW_CONTENT" ]; then
-            echo "Editing and approving: $DRAFT_ID"
-            approve_pending "$DRAFT_ID" "$NEW_CONTENT"
-            notify_result "$TYPE" "編集して承認" "ID: ${DRAFT_ID}\n内容: ${NEW_CONTENT:0:200}"
-          else
+          if [ "$ACTION" = "revise" ] && [ -n "$FEEDBACK" ]; then
+            echo "=== REVISION MODE ==="
+            echo "Original: ${ORIGINAL:0:100}..."
+            echo "Feedback: ${FEEDBACK:0:200}..."
+
+            # LLMに修正稿を生成させる
+            REVISION_PROMPT="以下のX（Twitter）投稿案に対して、修正指示に従って書き直してください。
+
+【元の投稿案】
+${ORIGINAL}
+
+【修正指示】
+${FEEDBACK}
+
+【ルール】
+- 修正指示に忠実に従う
+- 人間が書いたような自然な日本語
+- AIっぽい表現禁止（「〜の時代になりました」「〜ではないでしょうか」等）
+- 「だ・である」混じりのラフな口調
+- 具体的な数字や実例を含める
+- 140字を超える場合はスレッド形式にする
+- ハッシュタグ2〜3個を最後に付ける
+- 出力は投稿文のみ"
+
+            REVISED=$(llm_generate "$REVISION_PROMPT" "あなたはSNSマーケティングのプロです。日本語の自然な投稿文を作成します。")
+
+            if [ -z "$REVISED" ]; then
+              notify_discord "Revision Failed" "LLM revision failed for: ${DRAFT_ID}" 15158332
+              exit 1
+            fi
+
+            # 修正稿をpendingファイルに更新（v2として保存）
+            V2_DRAFT_ID="${DRAFT_ID}-v2"
+            V2_FILE="employees/logs/pending/${V2_DRAFT_ID}.json"
+
+            # 元のデータをベースに修正版を作成
+            jq --arg revised "$REVISED" --arg fb "$FEEDBACK" --arg v2 "$V2_DRAFT_ID" '
+              .id = $v2 |
+              .status = "pending" |
+              .revision_of = .id |
+              .feedback = $fb |
+              .data.post_text = $revised |
+              .data.reply_text = $revised |
+              .data.quote_text = $revised
+            ' "$PENDING_FILE" > "$V2_FILE"
+
+            # 元の下書きをrevision-pendingに更新
+            jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {status: "revision-pending", revised_at: $ts}' "$PENDING_FILE" > "${PENDING_FILE}.tmp"
+            mv "${PENDING_FILE}.tmp" "$PENDING_FILE"
+
+            # 修正稿をDiscordに通知（再レビュー用）
+            notify_draft_item "${TYPE} (revised)" "$V2_DRAFT_ID" "【修正稿】\n${REVISED}\n\n【修正指示】\n${FEEDBACK:0:300}"
+
+            # コミット
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git pull --rebase origin main || true
+            git add employees/logs/pending/
+            git commit -m "Revision: ${V2_DRAFT_ID}" || true
+            git push
+
+            echo "Revised draft sent for review: ${V2_DRAFT_ID}"
+
+          elif [ "$ACTION" = "approve" ]; then
+            echo "=== APPROVE MODE ==="
             echo "Approving: $DRAFT_ID"
+
             approve_pending "$DRAFT_ID"
-            CONTENT=$(jq -r '.data | (.post_text // .reply_text // .quote_text // "N/A")' "$PENDING_FILE")
-            notify_result "$TYPE" "承認済み" "ID: ${DRAFT_ID}\n内容: ${CONTENT:0:200}"
+            notify_draft_item "${TYPE} (approved)" "$DRAFT_ID" "Approved and posted:\n${ORIGINAL:0:300}"
+
+            # コミット
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git pull --rebase origin main || true
+            git add employees/logs/pending/
+            git commit -m "Approved: ${DRAFT_ID}" || true
+            git push
+
+          else
+            echo "Unknown action or missing feedback"
+            notify_discord "Error" "Unknown action: ${ACTION}" 15158332
+            exit 1
           fi
