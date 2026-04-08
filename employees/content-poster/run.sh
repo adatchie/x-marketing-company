@@ -11,6 +11,27 @@ cat > "$CONTENT_LOG" << HEADER
 # コンテンツ投稿ログ $(date +%Y-%m-%d)
 HEADER
 
+# 学習インサイトを読み込み
+INSIGHTS_CONTEXT=""
+if [ -f "${INSIGHTS_DIR}/latest.md" ]; then
+    INSIGHTS_CONTEXT=$(cat "${INSIGHTS_DIR}/latest.md" | head -50)
+    log "content-poster" "過去のインサイトを読み込み"
+fi
+
+# インサイト付きプロンプトのヘッダー
+build_prompt() {
+    local base_prompt="$1"
+    if [ -n "$INSIGHTS_CONTEXT" ]; then
+        echo "${base_prompt}
+
+【過去の投稿分析からの学習】
+${INSIGHTS_CONTEXT}
+上記のインサイトを参考に、より効果的な投稿を作成してください。"
+    else
+        echo "$base_prompt"
+    fi
+}
+
 # ポスト生成プロンプト
 MORNING_PROMPT='以下の条件でX（Twitter）の投稿文を1つ作成してください。
 テーマ: 気づき・名言・今日の一言
@@ -35,6 +56,11 @@ NIGHT_PROMPT='以下の条件でX（Twitter）の投稿文を1つ作成してく
 ハッシュタグを2〜3個含める
 トーン: 親しみやすく、専門的すぎない
 出力は投稿文のみ（説明や前置きは不要）'
+
+# インサイトを反映
+MORNING_PROMPT=$(build_prompt "$MORNING_PROMPT")
+NOON_PROMPT=$(build_prompt "$NOON_PROMPT")
+NIGHT_PROMPT=$(build_prompt "$NIGHT_PROMPT")
 
 # フォールバック（LLM APIなし用）
 fallback_morning() {
@@ -119,4 +145,20 @@ CONTENT
 
 log "content-poster" "3件の投稿案を作成"
 log "content-poster" "保存先: ${CONTENT_LOG}"
-log "content-poster" "※ 社長承認後に send-post.sh で投稿してください"
+
+# 承認待ちキューに登録 + Discord通知
+for phase_name in "朝:morning" "昼:noon" "夜:night"; do
+    label="${phase_name%%:*}"
+    key="${phase_name##*:}"
+    case "$key" in
+        morning) post_text="$MORNING_POST" ;;
+        noon)    post_text="$NOON_POST" ;;
+        night)   post_text="$NIGHT_POST" ;;
+    esac
+
+    draft_data=$(jq -n --arg pt "$post_text" '{post_text: $pt}')
+    draft_id=$(queue_approval "content" "$draft_data")
+    log "content-poster" "承認待ち登録: ${label}の投稿 (ID: ${draft_id})"
+done
+
+notify_draft "content-poster" "$CONTENT_LOG"

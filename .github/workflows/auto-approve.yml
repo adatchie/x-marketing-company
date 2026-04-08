@@ -1,0 +1,79 @@
+name: Auto Approve
+
+on:
+  schedule:
+    # 30分ごとにチェック
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  auto-approve:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install xurl
+        run: npm install -g @xdevplatform/xurl
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Setup xurl config
+        run: |
+          mkdir -p ~/.xurl
+          cat > ~/.xurl/config.yml << EOF
+          apps:
+              default:
+                  oauth1_token:
+                      type: oauth1
+                      oauth1:
+                          access_token: ${{ secrets.X_OAUTH_ACCESS_TOKEN }}
+                          token_secret: ${{ secrets.X_OAUTH_TOKEN_SECRET }}
+                          consumer_key: ${{ secrets.X_OAUTH_CONSUMER_KEY }}
+                          consumer_secret: ${{ secrets.X_OAUTH_CONSUMER_SECRET }}
+                  bearer_token:
+                      type: bearer
+                      bearer: ${{ secrets.X_BEARER_TOKEN }}
+          default_app: default
+          EOF
+
+      - name: Create directories
+        run: mkdir -p employees/logs/pending
+
+      - name: Check and auto-approve expired drafts
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: glm-5.1
+          LLM_API_URL: https://api.z.ai/api/coding/paas/v4/chat/completions
+          GITHUB_REPO: ${{ github.repository }}
+          AUTO_APPROVE_HOURS: 2
+        run: |
+          source lib/utils.sh
+
+          EXPIRED=$(get_expired "$AUTO_APPROVE_HOURS")
+          if [ -z "$EXPIRED" ]; then
+            echo "No expired drafts found"
+            exit 0
+          fi
+
+          for draft_id in $EXPIRED; do
+            echo "Auto-approving: $draft_id"
+            approve_pending "$draft_id"
+
+            PENDING_FILE="${PENDING_DIR}/${draft_id}.json"
+            if [ -f "$PENDING_FILE" ]; then
+              TYPE=$(jq -r '.type' "$PENDING_FILE")
+              CONTENT=$(jq -r '.data | (.post_text // .reply_text // .quote_text // "N/A")' "$PENDING_FILE")
+              notify_result "$TYPE" "自動承認（時間切れ）" "ID: ${draft_id}\n内容: ${CONTENT:0:200}" "true"
+            fi
+          done

@@ -10,6 +10,9 @@ MODE="${1:-morning}"  # morning / noon / evening / all
 case "$MODE" in
     morning)
         echo "【朝の業務】(7:00)"
+        echo "impression-analyzer: 昨日の投稿を分析"
+        bash "${SCRIPT_DIR}/employees/impression-analyzer/run.sh"
+        echo ""
         echo "content-poster: 朝の投稿案を作成"
         bash "${SCRIPT_DIR}/employees/content-poster/run.sh"
         echo ""

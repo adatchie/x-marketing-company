@@ -4,6 +4,8 @@
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(dirname "${LIB_DIR}")"
 source "${SCRIPT_DIR}/config.sh"
+source "${LIB_DIR}/notify.sh"
+source "${LIB_DIR}/approval.sh"
 
 # ログ出力
 log() {

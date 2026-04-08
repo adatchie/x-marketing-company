@@ -13,8 +13,12 @@ echo ""
 # ログディレクトリ確認
 mkdir -p "$LOG_DIR"
 
-# Phase 1: アカウント選定（他の社員の依存元）
-echo "【Phase 1】account-selector を起動..."
+# Phase 1: 分析・アカウント選定（他の社員の依存元）
+echo "【Phase 1】impression-analyzer を起動..."
+bash "${SCRIPT_DIR}/employees/impression-analyzer/run.sh"
+echo ""
+
+echo "【Phase 1b】account-selector を起動..."
 bash "${SCRIPT_DIR}/employees/account-selector/run.sh"
 echo ""
 

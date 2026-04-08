@@ -73,7 +73,7 @@ jobs:
           fi
 
       - name: Create log directory
-        run: mkdir -p employees/logs
+        run: mkdir -p employees/logs/pending
 
       - name: Run daily schedule
         env:
@@ -81,7 +81,19 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: glm-5.1
           LLM_API_URL: https://api.z.ai/api/coding/paas/v4/chat/completions
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GITHUB_REPO: ${{ github.repository }}
         run: bash daily-schedule.sh "$PHASE"
+
+      - name: Commit pending approvals
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -d "employees/logs/pending" ] && [ "$(ls employees/logs/pending/*.json 2>/dev/null)" ]; then
+            git add employees/logs/pending/
+            git commit -m "Add pending approvals $(date +%Y-%m-%d)" || true
+            git push
+          fi
 
       - name: Upload logs
         if: always()

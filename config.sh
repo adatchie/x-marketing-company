@@ -28,3 +28,17 @@ ACTION_DELAY=3
 LLM_API_KEY="${LLM_API_KEY:-}"
 LLM_MODEL="${LLM_MODEL:-glm-5.1}"
 LLM_API_URL="${LLM_API_URL:-https://api.z.ai/api/coding/paas/v4/chat/completions}"
+
+# Discord通知
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+
+# 承認設定
+AUTO_APPROVE_HOURS="${AUTO_APPROVE_HOURS:-2}"
+PENDING_DIR="${LOG_DIR}/pending"
+
+# 学習データ
+METRICS_DIR="${LOG_DIR}/metrics"
+INSIGHTS_DIR="${LOG_DIR}/insights"
+
+# GitHub（承認リンク用）
+GITHUB_REPO="${GITHUB_REPO:-adatchie/x-marketing-company}"

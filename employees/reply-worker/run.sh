@@ -54,9 +54,18 @@ for username in $USERNAMES; do
 ENTRY
 
     log "reply-worker" "@${username} へのリプライ案を3パターン作成（投稿ID: ${TWEET_ID}）"
+
+    # 承認待ちに登録（最初のリプライ案をデフォルトに）
+    draft_data=$(jq -n \
+        --arg tid "$TWEET_ID" \
+        --arg tt "$TWEET_TEXT" \
+        --arg rt "${TWEET_TEXT:0:30}... ←これ、すごく分かります！私も同じように感じています。" \
+        '{tweet_id: $tid, tweet_text: $tt, reply_text: $rt}')
+    queue_approval "reply" "$draft_data" > /dev/null
 done
 
 REPLY_COUNT=$(grep -c "投稿ID:" "$REPLY_LOG" 2>/dev/null || echo "0")
 log "reply-worker" "リプライ案作成完了: ${REPLY_COUNT}件"
 log "reply-worker" "保存先: ${REPLY_LOG}"
-log "reply-worker" "※ 社長承認後に send-reply.sh で送信してください"
+
+notify_draft "reply-worker" "$REPLY_LOG"
