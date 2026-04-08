@@ -6,6 +6,7 @@ SCRIPT_DIR="$(dirname "${LIB_DIR}")"
 source "${SCRIPT_DIR}/config.sh"
 source "${LIB_DIR}/notify.sh"
 source "${LIB_DIR}/approval.sh"
+source "${LIB_DIR}/persona.sh"
 
 # ログ出力
 log() {
