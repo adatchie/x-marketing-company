@@ -50,26 +50,25 @@ notify_draft_item() {
     tmp_json=$(mktemp)
 
     local truncated_content="$draft_content"
-    if [ ${#truncated_content} -gt 800 ]; then
-        truncated_content="${truncated_content:0:800}..."
+    if [ ${#truncated_content} -gt 600 ]; then
+        truncated_content="${truncated_content:0:600}..."
     fi
 
+    local instructions="Draft ID: \`\`\`\n${draft_id}\n\`\`\`\n[Run workflow](${approve_url})\n**Approve**: action=approve, draft_id=上記\n**Revise**: action=revise, draft_id=上記, feedback=修正指示"
+
     jq -n \
-        --arg title "【${employee}】$(date +%Y-%m-%d)" \
+        --arg title "[${employee}] $(date +%Y-%m-%d)" \
         --arg content "$truncated_content" \
-        --arg draft_id "$draft_id" \
-        --arg approve_url "$approve_url" \
+        --arg instructions "$instructions" \
         '{
             embeds: [{
                 title: $title,
                 description: $content,
                 color: 3447003,
                 fields: [
-                    { name: "Draft ID", value: ("`" + $draft_id + "`"), inline: false },
-                    { name: "Approve", value: ("[Approve](" + $approve_url + ")"), inline: true },
-                    { name: "Edit & Approve", value: ("[Edit](" + $approve_url + ")"), inline: true }
+                    { name: "How to approve/revise", value: $instructions }
                 ],
-                footer: { text: "Auto-approve in 2 hours" }
+                footer: { text: "Auto-approve in 2h" }
             }]
         }' > "$tmp_json"
 
