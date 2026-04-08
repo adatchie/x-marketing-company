@@ -58,12 +58,12 @@ ENTRY
             --arg tt "$TWEET_TEXT" \
             --arg qt "この視点、大事ですよね。私の場合も同じように感じています。" \
             '{tweet_id: $tid, tweet_text: $tt, quote_text: $qt}')
-        queue_approval "quote" "$draft_data" > /dev/null
+        draft_id=$(queue_approval "quote" "$draft_data")
+
+        notify_draft_item "quote-poster (@${USERNAME})" "$draft_id" "Quote: ${TWEET_TEXT}"
     done
 done
 
 CANDIDATE_COUNT=$(grep -c "^## 引用候補" "$QUOTE_LOG" 2>/dev/null || echo "0")
 log "quote-poster" "候補リスト作成完了: ${CANDIDATE_COUNT}件"
 log "quote-poster" "保存先: ${QUOTE_LOG}"
-
-notify_draft "quote-poster" "$QUOTE_LOG"

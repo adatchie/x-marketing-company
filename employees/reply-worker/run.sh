@@ -61,11 +61,11 @@ ENTRY
         --arg tt "$TWEET_TEXT" \
         --arg rt "${TWEET_TEXT:0:30}... ←これ、すごく分かります！私も同じように感じています。" \
         '{tweet_id: $tid, tweet_text: $tt, reply_text: $rt}')
-    queue_approval "reply" "$draft_data" > /dev/null
+    draft_id=$(queue_approval "reply" "$draft_data")
+
+    notify_draft_item "reply-worker (@${username})" "$draft_id" "Reply to: ${TWEET_TEXT}\n\n${TWEET_TEXT:0:30}... ←これ、すごく分かります！"
 done
 
 REPLY_COUNT=$(grep -c "投稿ID:" "$REPLY_LOG" 2>/dev/null || echo "0")
 log "reply-worker" "リプライ案作成完了: ${REPLY_COUNT}件"
 log "reply-worker" "保存先: ${REPLY_LOG}"
-
-notify_draft "reply-worker" "$REPLY_LOG"

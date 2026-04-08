@@ -182,7 +182,7 @@ CONTENT
 log "content-poster" "3件の投稿案を作成"
 log "content-poster" "保存先: ${CONTENT_LOG}"
 
-# 承認待ちキューに登録 + Discord通知
+# 承認待ちキューに登録 + Discord通知（個別）
 for phase_name in "朝:morning" "昼:noon" "夜:night"; do
     label="${phase_name%%:*}"
     key="${phase_name##*:}"
@@ -195,6 +195,6 @@ for phase_name in "朝:morning" "昼:noon" "夜:night"; do
     draft_data=$(jq -n --arg pt "$post_text" '{post_text: $pt}')
     draft_id=$(queue_approval "content" "$draft_data")
     log "content-poster" "承認待ち登録: ${label}の投稿 (ID: ${draft_id})"
-done
 
-notify_draft "content-poster" "$CONTENT_LOG"
+    notify_draft_item "content-poster (${label})" "$draft_id" "$post_text"
+done
