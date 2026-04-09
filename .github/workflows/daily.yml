@@ -89,16 +89,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: bash daily-schedule.sh "$PHASE"
 
-      - name: Commit pending approvals
+      - name: Commit logs and pending approvals
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if [ -d "employees/logs/pending" ] && [ "$(ls employees/logs/pending/*.json 2>/dev/null)" ]; then
-            git pull --rebase origin main || true
-            git add employees/logs/pending/
-            git commit -m "Add pending approvals $(date +%Y-%m-%d)" || true
-            git push
-          fi
+          git pull --rebase origin main || true
+          git add employees/logs/ || true
+          git commit -m "Update logs $(date +%Y-%m-%d)" || true
+          git push
 
       - name: Upload logs
         if: always()
