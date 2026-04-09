@@ -8,6 +8,23 @@ DRAFT_ID="$1"
 ACTION="$2"
 FEEDBACK="$3"
 
+# Git push with retry for concurrent workflow conflicts
+git_add_and_push() {
+    local msg="$1"
+    git config user.name "github-actions[bot]"
+    git config user.email "github-actions[bot]@users.noreply.github.com"
+    git add employees/logs/pending/
+    git commit -m "$msg" || return 0
+    for i in 1 2 3; do
+        git stash --include-untracked 2>/dev/null || true
+        git pull --rebase origin main 2>/dev/null || true
+        git stash pop 2>/dev/null || true
+        git push && return 0
+        sleep 5
+    done
+    echo "Warning: git push failed after 3 retries"
+}
+
 PENDING_FILE="employees/logs/pending/${DRAFT_ID}.json"
 if [ ! -f "$PENDING_FILE" ]; then
     echo "Error: Draft not found: $DRAFT_ID"
@@ -63,12 +80,7 @@ Rules:
 
     notify_draft_item "${TYPE} (revised)" "$V2_DRAFT_ID" "${REVISED}"
 
-    git config user.name "github-actions[bot]"
-    git config user.email "github-actions[bot]@users.nreply.github.com"
-    git pull --rebase origin main || true
-    git add employees/logs/pending/
-    git commit -m "Revision: ${V2_DRAFT_ID}" || true
-    git push
+    git_add_and_push "Revision: ${V2_DRAFT_ID}"
 
 elif [ "$ACTION" = "regenerate" ]; then
     echo "=== REGENERATE MODE ==="
@@ -125,12 +137,7 @@ ${EXTRA_CTX}"
 
     notify_draft_item "${TYPE} (regenerated)" "$REGEN_DRAFT_ID" "${REGENERATED}"
 
-    git config user.name "github-actions[bot]"
-    git config user.email "github-actions[bot]@users.noreply.github.com"
-    git pull --rebase origin main || true
-    git add employees/logs/pending/
-    git commit -m "Regenerate: ${REGEN_DRAFT_ID}" || true
-    git push
+    git_add_and_push "Regenerate: ${REGEN_DRAFT_ID}"
 
 elif [ "$ACTION" = "approve" ]; then
     echo "=== APPROVE MODE ==="
@@ -138,12 +145,7 @@ elif [ "$ACTION" = "approve" ]; then
     approve_pending "$DRAFT_ID"
     notify_draft_item "${TYPE} (approved)" "$DRAFT_ID" "Posted: ${ORIGINAL:0:300}"
 
-    git config user.name "github-actions[bot]"
-    git config user.email "github-actions[bot]@users.noreply.github.com"
-    git pull --rebase origin main || true
-    git add employees/logs/pending/
-    git commit -m "Approved: ${DRAFT_ID}" || true
-    git push
+    git_add_and_push "Approved: ${DRAFT_ID}"
 
 else
     echo "Unknown action: ${ACTION}"
