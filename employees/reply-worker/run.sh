@@ -9,8 +9,8 @@ ACCOUNT_LIST="${LOG_DIR}/account-list-${TODAY}.md"
 REPLY_LOG="${LOG_DIR}/reply-log-${TODAY}.md"
 
 if [ ! -f "$ACCOUNT_LIST" ]; then
-    log "reply-worker" "アカウントリストがありません。account-selectorを実行してください"
-    exit 1
+    log "reply-worker" "アカウントリストがありません。今日はスキップします"
+    exit 0
 fi
 
 cat > "$REPLY_LOG" << HEADER

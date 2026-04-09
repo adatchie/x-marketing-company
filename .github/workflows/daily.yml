@@ -86,6 +86,7 @@ jobs:
           LLM_API_URL: https://api.z.ai/api/coding/paas/v4/chat/completions
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GITHUB_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: bash daily-schedule.sh "$PHASE"
 
       - name: Commit pending approvals
