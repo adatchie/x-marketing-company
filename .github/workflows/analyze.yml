@@ -4,9 +4,6 @@ permissions:
   contents: write
 
 on:
-  schedule:
-    # 毎日朝6:00 JST = 21:00 UTC 前日
-    - cron: '3 21 * * *'
   workflow_dispatch:
 
 env:

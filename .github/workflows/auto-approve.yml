@@ -4,9 +4,6 @@ permissions:
   contents: write
 
 on:
-  schedule:
-    # 30分ごとにチェック
-    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 env:

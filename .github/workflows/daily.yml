@@ -1,13 +1,6 @@
 name: X Marketing Daily
 
 on:
-  schedule:
-    # 朝 7:00 JST = 22:00 UTC 前日
-    - cron: '57 21 * * *'
-    # 昼 12:00 JST = 03:00 UTC
-    - cron: '3 3 * * *'
-    # 夜 21:00 JST = 12:00 UTC
-    - cron: '3 12 * * *'
   workflow_dispatch:
     inputs:
       phase:
