@@ -1,244 +1,26 @@
-name: Approve Draft
-
-permissions:
-  contents: write
+name: approve
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'アクション (approve/revise/regenerate)'
+        description: approve or revise or regenerate
         required: true
-        default: 'approve'
+        default: approve
       draft_id:
-        description: '下書きID'
+        description: draft id
         required: true
       feedback:
-        description: '修正指示（revise）または再生成の追加指示（regenerate、空でもOK）'
+        description: feedback (optional)
         required: false
-        default: ''
+        default: ""
 
-env:
-  NODE_VERSION: '20'
+permissions:
+  contents: write
 
 jobs:
   approve:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install xurl
-        run: npm install -g @xdevplatform/xurl
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Setup xurl config
-        run: |
-          mkdir -p ~/.xurl
-          cat > ~/.xurl/config.yml << EOF
-          apps:
-              default:
-                  oauth1_token:
-                      type: oauth1
-                      oauth1:
-                          access_token: ${{ secrets.X_OAUTH_ACCESS_TOKEN }}
-                          token_secret: ${{ secrets.X_OAUTH_TOKEN_SECRET }}
-                          consumer_key: ${{ secrets.X_OAUTH_CONSUMER_KEY }}
-                          consumer_secret: ${{ secrets.X_OAUTH_CONSUMER_SECRET }}
-                  bearer_token:
-                      type: bearer
-                      bearer: ${{ secrets.X_BEARER_TOKEN }}
-          default_app: default
-          EOF
-
-      - name: Create directories
-        run: mkdir -p employees/logs/pending
-
-      - name: Process action
-        env:
-          DRAFT_ID: ${{ github.event.inputs.draft_id }}
-          ACTION: ${{ github.event.inputs.action }}
-          FEEDBACK: ${{ github.event.inputs.feedback }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_MODEL: glm-5.1
-          LLM_API_URL: https://api.z.ai/api/coding/paas/v4/chat/completions
-          GITHUB_REPO: ${{ github.repository }}
-        run: |
-          source lib/utils.sh
-
-          PENDING_FILE="employees/logs/pending/${DRAFT_ID}.json"
-          if [ ! -f "$PENDING_FILE" ]; then
-            echo "Error: Draft not found: $DRAFT_ID"
-            notify_discord "Error" "Draft not found: ${DRAFT_ID}" 15158332
-            exit 1
-          fi
-
-          TYPE=$(jq -r '.type' "$PENDING_FILE")
-          ORIGINAL=$(jq -r '.data | (.post_text // .reply_text // .quote_text // "N/A")' "$PENDING_FILE")
-
-          if [ "$ACTION" = "revise" ] && [ -n "$FEEDBACK" ]; then
-            echo "=== REVISION MODE ==="
-            echo "Original: ${ORIGINAL:0:100}..."
-            echo "Feedback: ${FEEDBACK:0:200}..."
-
-            # LLMに修正稿を生成させる
-            REVISION_PROMPT="以下のX（Twitter）投稿案に対して、修正指示に従って書き直してください。
-
-【元の投稿案】
-${ORIGINAL}
-
-【修正指示】
-${FEEDBACK}
-
-【ルール】
-- 修正指示に忠実に従う
-- 人間が書いたような自然な日本語
-- AIっぽい表現禁止（「〜の時代になりました」「〜ではないでしょうか」等）
-- 「だ・である」混じりのラフな口調
-- 具体的な数字や実例を含める
-- 140字を超える場合はスレッド形式にする
-- ハッシュタグ2〜3個を最後に付ける
-- 出力は投稿文のみ"
-
-            REVISED=$(llm_generate "$REVISION_PROMPT" "あなたはSNSマーケティングのプロです。日本語の自然な投稿文を作成します。")
-
-            if [ -z "$REVISED" ]; then
-              notify_discord "Revision Failed" "LLM revision failed for: ${DRAFT_ID}" 15158332
-              exit 1
-            fi
-
-            # 修正稿をpendingファイルに更新（v2として保存）
-            V2_DRAFT_ID="${DRAFT_ID}-v2"
-            V2_FILE="employees/logs/pending/${V2_DRAFT_ID}.json"
-
-            # 元のデータをベースに修正版を作成
-            jq --arg revised "$REVISED" --arg fb "$FEEDBACK" --arg v2 "$V2_DRAFT_ID" '
-              .id = $v2 |
-              .status = "pending" |
-              .revision_of = .id |
-              .feedback = $fb |
-              .data.post_text = $revised |
-              .data.reply_text = $revised |
-              .data.quote_text = $revised
-            ' "$PENDING_FILE" > "$V2_FILE"
-
-            # 元の下書きをrevision-pendingに更新
-            jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {status: "revision-pending", revised_at: $ts}' "$PENDING_FILE" > "${PENDING_FILE}.tmp"
-            mv "${PENDING_FILE}.tmp" "$PENDING_FILE"
-
-            # 修正稿をDiscordに通知（再レビュー用）
-            notify_draft_item "${TYPE} (revised)" "$V2_DRAFT_ID" "【修正稿】\n${REVISED}\n\n【修正指示】\n${FEEDBACK:0:300}"
-
-            # コミット
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git pull --rebase origin main || true
-            git add employees/logs/pending/
-            git commit -m "Revision: ${V2_DRAFT_ID}" || true
-            git push
-
-            echo "Revised draft sent for review: ${V2_DRAFT_ID}"
-
-          elif [ "$ACTION" = "regenerate" ]; then
-            echo "=== REGENERATE MODE ==="
-
-            # リサーチデータがあれば取得
-            RESEARCH_DATA=""
-            RESEARCH_FILE="employees/logs/research-brief-$(date +%Y-%m-%d).md"
-            if [ -f "$RESEARCH_FILE" ]; then
-              RESEARCH_DATA=$(cat "$RESEARCH_FILE" | head -100)
-            fi
-
-            EXTRA_CTX=""
-            if [ -n "$FEEDBACK" ]; then
-              EXTRA_CTX="【追加指示】${FEEDBACK}"
-            fi
-
-            REGEN_PROMPT="X（Twitter）の投稿文を1つ作成する。前の案をボツにして、全く新しい切り口で書き直す。
-
-【絶対ルール】
-1. 提供されたリサーチデータのみを使う。データにない情報は絶対に書かない。
-2. 人間が書いたような自然な日本語。AIっぽい表現禁止。
-3. 禁止：「〜の時代になりました」「〜ではないでしょうか」「皆さん」「ぜひ」「革新的な」
-4. 「だ・である」混じりのラフな口調。一人称は「ぼく」または省略。
-5. 具体的なツール名・数字を入れる。
-6. 140字超えならスレッド形式。
-7. ハッシュタグ2〜3個。出力は投稿文のみ。
-
-【ペルソナ】
-「AI×副業 60日で0→1チャレンジ」実践中の30代。
-note販売、X、Threads、YouTube、アフィリエイト等を手広く試している。実績なし。
-常にチャレンジの文脈で書く。成功者を装わない。
-禁止：Polymarket、予測市場、BOT、仮想通貨ギャンブル、収益額の誇示
-
-【リサーチデータ（これだけを使う）】
-${RESEARCH_DATA}
-
-${EXTRA_CTX}
-
-出力は投稿文のみ。"
-
-            REGENERATED=$(llm_generate "$REGEN_PROMPT" "あなたはSNSマーケティングのプロです。")
-
-            if [ -z "$REGENERATED" ]; then
-              notify_discord "Regenerate Failed" "LLM regenerate failed for: ${DRAFT_ID}" 15158332
-              exit 1
-            fi
-
-            # 新しいpendingファイルを作成
-            REGEN_DRAFT_ID="${TYPE}-$(date +%Y%m%d%H%M%S)-regen"
-            REGEN_FILE="employees/logs/pending/${REGEN_DRAFT_ID}.json"
-
-            jq -n \
-              --arg id "$REGEN_DRAFT_ID" \
-              --arg type "$TYPE" \
-              --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              --arg status "pending" \
-              --arg pt "$REGENERATED" \
-              --arg regen_from "$DRAFT_ID" \
-              '{id: $id, type: $type, status: $status, created_at: $ts, regenerated_from: $regen_from, data: {post_text: $pt, reply_text: $pt, quote_text: $pt}}' > "$REGEN_FILE"
-
-            # 元の下書きをrejectedに
-            jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {status: "rejected", rejected_at: $ts}' "$PENDING_FILE" > "${PENDING_FILE}.tmp"
-            mv "${PENDING_FILE}.tmp" "$PENDING_FILE"
-
-            # 再生成稿をDiscordに通知
-            notify_draft_item "${TYPE} (regenerated)" "$REGEN_DRAFT_ID" "【再生成稿】\n${REGENERATED}"
-
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git pull --rebase origin main || true
-            git add employees/logs/pending/
-            git commit -m "Regenerate: ${REGEN_DRAFT_ID} (from ${DRAFT_ID})" || true
-            git push
-
-            echo "Regenerated draft: ${REGEN_DRAFT_ID}"
-
-          elif [ "$ACTION" = "approve" ]; then
-            echo "=== APPROVE MODE ==="
-            echo "Approving: $DRAFT_ID"
-
-            approve_pending "$DRAFT_ID"
-            notify_draft_item "${TYPE} (approved)" "$DRAFT_ID" "Approved and posted:\n${ORIGINAL:0:300}"
-
-            # コミット
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git pull --rebase origin main || true
-            git add employees/logs/pending/
-            git commit -m "Approved: ${DRAFT_ID}" || true
-            git push
-
-          else
-            echo "Unknown action or missing feedback"
-            notify_discord "Error" "Unknown action: ${ACTION}" 15158332
-            exit 1
-          fi
+      - uses: actions/checkout@v4
+      - run: echo "action=${{ github.event.inputs.action }} draft_id=${{ github.event.inputs.draft_id }}"
